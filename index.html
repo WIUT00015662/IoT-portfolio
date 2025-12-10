@@ -728,7 +728,14 @@
         }
 
         // Fan control
+        let pendingFanToggle = null; // Track pending fan state changes
+
         async function updateFanStatus() {
+            // Don't update toggle if we're waiting for user's command to complete
+            if (pendingFanToggle !== null) {
+                return;
+            }
+
             const fanData = await fetchSupabase('fan', 1);
             if (fanData && fanData.length > 0) {
                 const isOn = fanData[0].fan_state;
@@ -740,10 +747,12 @@
 
         async function toggleFan() {
             const isOn = document.getElementById('fanToggle').checked;
-            addLog('fanLog', `⏳ Setting fan to ${isOn ? 'ON' : 'OFF'}...`, 'info');
+            pendingFanToggle = isOn; // Store expected state
+            
+            addLog('fanLog', `⏳ Sending fan ${isOn ? 'ON' : 'OFF'} command...`, 'info');
 
             try {
-                const response = await fetch(`${config.supabaseUrl}/rest/v1/fan`, {
+                const response = await fetch(`${config.supabaseUrl}/rest/v1/command`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -751,19 +760,44 @@
                         'Authorization': `Bearer ${config.supabaseKey}`,
                         'Prefer': 'return=minimal'
                     },
-                    body: JSON.stringify({ fan_state: isOn })
+                    body: JSON.stringify({
+                        command: isOn ? 'on' : 'off',
+                        command_type: 'fan',
+                        status: 'pending'
+                    })
                 });
 
                 if (response.ok) {
-                    document.getElementById('fanStatus').textContent = isOn ? 'ON' : 'OFF';
-                    document.getElementById('fanStatus').style.color = isOn ? '#27ae60' : '#e74c3c';
-                    addLog('fanLog', `✅ Fan turned ${isOn ? 'ON' : 'OFF'}`, 'success');
+                    addLog('fanLog', `✅ Command sent. Waiting 10 seconds to verify...`, 'success');
+                    
+                    // After 10 seconds, check if the state changed as expected
+                    setTimeout(async () => {
+                        const fanData = await fetchSupabase('fan', 1);
+                        if (fanData && fanData.length > 0) {
+                            const actualState = fanData[0].fan_state;
+                            
+                            if (actualState === pendingFanToggle) {
+                                addLog('fanLog', `✅ Fan successfully turned ${actualState ? 'ON' : 'OFF'}!`, 'success');
+                            } else {
+                                addLog('fanLog', `⚠️ Fan state didn't change. Still ${actualState ? 'ON' : 'OFF'}`, 'error');
+                            }
+                        } else {
+                            addLog('fanLog', `⚠️ Could not verify fan state`, 'error');
+                        }
+                        
+                        // Clear pending state and allow updates
+                        pendingFanToggle = null;
+                        // Now update the toggle to reflect actual state
+                        await updateFanStatus();
+                    }, 10000);
                 } else {
-                    addLog('fanLog', '❌ Failed to update fan status', 'error');
+                    addLog('fanLog', '❌ Failed to send command', 'error');
+                    pendingFanToggle = null; // Clear on failure
                 }
             } catch (error) {
                 console.error('Error toggling fan:', error);
                 addLog('fanLog', '❌ Error: ' + error.message, 'error');
+                pendingFanToggle = null; // Clear on error
             }
         }
 
@@ -913,6 +947,7 @@ Return ONLY the JSON object, no additional text.`
 
                 if (response.ok) {
                     addLog('voiceLog', '✅ Command sent to database! NodeMCU will process it.', 'success');
+                    setTimeout(fetchAllData, 1500); // quick refresh to reflect changes
                 } else {
                     addLog('voiceLog', '❌ Failed to save command', 'error');
                 }
@@ -946,8 +981,8 @@ Return ONLY the JSON object, no additional text.`
             // Only fetch data if config is set
             if (config.supabaseUrl && config.supabaseKey) {
                 fetchAllData();
-                // Auto-refresh every 30 seconds
-                setInterval(fetchAllData, 30000);
+                // Auto-refresh every 5 seconds for faster updates
+                setInterval(fetchAllData, 5000);
             } else {
                 console.log('⚠️ Please configure your Supabase credentials');
             }
