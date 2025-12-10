@@ -731,7 +731,7 @@
         let pendingFanToggle = null; // Track pending fan state changes
 
         async function updateFanStatus() {
-            // Don't update toggle if we're waiting for user's command to complete
+            // Don't touch the toggle automatically; only update status text/colors.
             if (pendingFanToggle !== null) {
                 return;
             }
@@ -739,7 +739,6 @@
             const fanData = await fetchSupabase('fan', 1);
             if (fanData && fanData.length > 0) {
                 const isOn = fanData[0].fan_state;
-                document.getElementById('fanToggle').checked = isOn;
                 document.getElementById('fanStatus').textContent = isOn ? 'ON' : 'OFF';
                 document.getElementById('fanStatus').style.color = isOn ? '#27ae60' : '#e74c3c';
             }
@@ -785,9 +784,8 @@
                             addLog('fanLog', `⚠️ Could not verify fan state`, 'error');
                         }
                         
-                        // Clear pending state and allow updates
+                        // Clear pending state and allow updates (status text only)
                         pendingFanToggle = null;
-                        // Now update the toggle to reflect actual state
                         await updateFanStatus();
                     }, 10000);
                 } else {
